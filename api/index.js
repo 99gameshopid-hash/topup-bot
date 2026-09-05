@@ -1,7 +1,20 @@
 const axios = require('axios');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const SHEET_API_URL = process.env.SHEET_API_URL;
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+
+// Fungsi untuk mengambil/mendaftarkan data user dari Google Sheets
+async function getUserData(chatId, name) {
+  try {
+    if (!SHEET_API_URL) return { saldo: 0 };
+    const response = await axios.get(`${SHEET_API_URL}?action=getUser&chatId=${chatId}&name=${encodeURIComponent(name)}`);
+    return response.data;
+  } catch (err) {
+    console.error("Gagal mengambil data dari Sheet:", err.message);
+    return { saldo: 0 };
+  }
+}
 
 module.exports = async (req, res) => {
   try {
@@ -14,6 +27,9 @@ module.exports = async (req, res) => {
         const name = body.message.from.first_name || 'User';
 
         if (text === '/start') {
+          // Otomatis daftar/ambil data user dari Sheet
+          await getUserData(chatId, name);
+
           await axios.post(`${TELEGRAM_API}/sendMessage`, {
             chat_id: chatId,
             text: `Selamat datang di Bot Topup, <b>${name}</b>! 👋\n\nLayanan topup game otomatis, cepat, dan terpercaya. Silahkan pilih menu di bawah:`,
@@ -31,6 +47,7 @@ module.exports = async (req, res) => {
         const chatId = cb.message.chat.id;
         const messageId = cb.message.message_id;
         const data = cb.data;
+        const name = cb.from.first_name || 'User';
 
         await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
           callback_query_id: cb.id
@@ -50,10 +67,14 @@ module.exports = async (req, res) => {
             }
           });
         } else if (data === 'menu_profile') {
+          // Ambil saldo langsung dari Google Sheets
+          const user = await getUserData(chatId, name);
+          const saldoFormatted = new Intl.NumberFormat('id-ID').format(user.saldo || 0);
+
           await axios.post(`${TELEGRAM_API}/editMessageText`, {
             chat_id: chatId,
             message_id: messageId,
-            text: `<b>👤 PROFIL PENGGUNA</b>\n\nID Chat: <code>${chatId}</code>\nSaldo Saat Ini: <b>Rp 0</b>\n\n<i>Ketik <code>/voucher KODE</code> untuk klaim voucher.</i>`,
+            text: `<b>👤 PROFIL PENGGUNA</b>\n\nNama: <b>${name}</b>\nID Chat: <code>${chatId}</code>\nSaldo Saat Ini: <b>Rp ${saldoFormatted}</b>\n\n<i>Ketik <code>/voucher KODE</code> untuk klaim voucher.</i>`,
             parse_mode: "HTML",
             reply_markup: {
               inline_keyboard: [[{ text: "⬅️ Kembali ke Menu", callback_data: "menu_main" }]]
@@ -63,7 +84,7 @@ module.exports = async (req, res) => {
           await axios.post(`${TELEGRAM_API}/editMessageText`, {
             chat_id: chatId,
             message_id: messageId,
-            text: `Selamat datang di Bot Topup, <b>${cb.from.first_name}</b>! 👋\n\nLayanan topup game otomatis, cepat, dan terpercaya. Silahkan pilih menu di bawah:`,
+            text: `Selamat datang di Bot Topup, <b>${name}</b>! 👋\n\nLayanan topup game otomatis, cepat, dan terpercaya. Silahkan pilih menu di bawah:`,
             parse_mode: "HTML",
             reply_markup: {
               inline_keyboard: [
@@ -79,6 +100,5 @@ module.exports = async (req, res) => {
     console.error("Error:", err.message);
   }
 
-  // Respon OK dikirim di paling akhir setelah semua perintah Telegram selesai
   return res.status(200).send('OK');
 };
