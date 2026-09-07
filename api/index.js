@@ -2,8 +2,12 @@ const axios = require('axios');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SHEET_API_URL = process.env.SHEET_API_URL;
+const HOMETOPUP_KEY = process.env.HOMETOPUP_KEY;
+const MARKUP_PERCENT = 5; // Keuntungan 5%
+
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
+// Ambil Data User dari Google Sheets
 async function getUserData(chatId, name) {
   try {
     if (!SHEET_API_URL) return { saldo: 0 };
@@ -14,12 +18,44 @@ async function getUserData(chatId, name) {
   }
 }
 
-async function getProducts(brand) {
+// Tembak API Hometopup LANGSUNG dari Vercel
+async function getHometopupProductsDirect(brandName) {
   try {
-    if (!SHEET_API_URL) return [];
-    const res = await axios.get(`${SHEET_API_URL}?action=getProducts&brand=${encodeURIComponent(brand)}`);
-    return Array.isArray(res.data) ? res.data : [];
+    if (!HOMETOPUP_KEY) return [];
+
+    const res = await axios.post('https://api.hometopup.id/api/product', {}, {
+      headers: {
+        'Authorization': `Bearer ${HOMETOPUP_KEY}`,
+        'X-API-KEY': HOMETOPUP_KEY,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (!res.data || !res.data.data) return [];
+
+    // Filter Game & Status Aktif
+    const filtered = res.data.data.filter(item => {
+      const kat = (item.kategori || '').toUpperCase();
+      const brd = (brandName || '').toUpperCase();
+      const isActive = (item.status || '').toLowerCase() === 'aktif';
+      return (kat.includes(brd) || brd.includes(kat)) && isActive;
+    });
+
+    filtered.sort((a, b) => a.harga - b.harga);
+
+    return filtered.slice(0, 15).map(item => {
+      const hargaModal = parseFloat(item.harga || 0);
+      const hargaJual = Math.ceil(hargaModal + (hargaModal * (MARKUP_PERCENT / 100)));
+      return {
+        code: item.code,
+        name: item.nama_layanan,
+        price: hargaJual
+      };
+    });
   } catch (err) {
+    console.error('Error Hometopup Direct:', err.response ? err.response.data : err.message);
     return [];
   }
 }
@@ -38,7 +74,7 @@ module.exports = async (req, res) => {
           await getUserData(chatId, name);
           await axios.post(`${TELEGRAM_API}/sendMessage`, {
             chat_id: chatId,
-            text: `Selamat datang di Bot Topup Hometopup, <b>${name}</b>! 👋\n\nLayanan topup game otomatis, murah & serba cepat. Silahkan pilih menu:`,
+            text: `Selamat datang di Bot Topup Hometopup, <b>${name}</b>! 👋\n\nLayanan topup game otomatis, murah & cepat. Silahkan pilih menu:`,
             parse_mode: 'HTML',
             reply_markup: {
               inline_keyboard: [
@@ -80,13 +116,13 @@ module.exports = async (req, res) => {
             parse_mode: "HTML"
           });
 
-          const items = await getProducts(brand);
+          const items = await getHometopupProductsDirect(brand);
 
           if (items.length === 0) {
             await axios.post(`${TELEGRAM_API}/editMessageText`, {
               chat_id: chatId,
               message_id: messageId,
-              text: `⚠️ Produk ${brand} saat ini sedang tidak tersedia.`,
+              text: `⚠️ Produk ${brand} saat ini sedang tidak tersedia atau API Key belum sesuai.`,
               parse_mode: "HTML",
               reply_markup: { inline_keyboard: [[{ text: "⬅️ Kembali", callback_data: "menu_topup" }]] }
             });
@@ -105,21 +141,6 @@ module.exports = async (req, res) => {
               reply_markup: { inline_keyboard: buttons }
             });
           }
-        } else if (data.startsWith('info_')) {
-          const [, code, price] = data.split('_');
-          const hargaFmt = new Intl.NumberFormat('id-ID').format(price);
-
-          await axios.post(`${TELEGRAM_API}/editMessageText`, {
-            chat_id: chatId,
-            message_id: messageId,
-            text: `🛒 <b>KONFIRMASI PESANAN</b>\n\nKode Produk: <code>${code}</code>\nHarga: <b>Rp ${hargaFmt}</b>\n\n<i>Sistem saldo otomatis terpotong dari saldo bot kamu.</i>`,
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "⬅️ Kembali", callback_data: "menu_topup" }]
-              ]
-            }
-          });
         } else if (data === 'menu_profile') {
           const user = await getUserData(chatId, name);
           const saldoFormatted = new Intl.NumberFormat('id-ID').format(user.saldo || 0);
@@ -135,7 +156,7 @@ module.exports = async (req, res) => {
           await axios.post(`${TELEGRAM_API}/editMessageText`, {
             chat_id: chatId,
             message_id: messageId,
-            text: `Selamat datang di Bot Topup Hometopup, <b>${name}</b>! 👋\n\nLayanan topup game otomatis, murah & serba cepat. Silahkan pilih menu:`,
+            text: `Selamat datang di Bot Topup Hometopup, <b>${name}</b>! 👋\n\nLayanan topup game otomatis, murah & cepat. Silahkan pilih menu:`,
             parse_mode: "HTML",
             reply_markup: {
               inline_keyboard: [
