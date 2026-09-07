@@ -3,7 +3,7 @@ const axios = require('axios');
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SHEET_API_URL = process.env.SHEET_API_URL;
 const HOMETOPUP_KEY = process.env.HOMETOPUP_KEY;
-const MARKUP_PERCENT = 5; // Keuntungan 5%
+const MARKUP_PERCENT = 5;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
@@ -18,18 +18,18 @@ async function getUserData(chatId, name) {
   }
 }
 
-// Tembak API Hometopup LANGSUNG dari Vercel
+// Tembak API Hometopup LANGSUNG dari Vercel (Domain Utama)
 async function getHometopupProductsDirect(brandName) {
   try {
     if (!HOMETOPUP_KEY) return [];
 
-    const res = await axios.post('https://api.hometopup.id/api/product', {}, {
+    const res = await axios.post('https://hometopup.id/api/product', {}, {
       headers: {
         'Authorization': `Bearer ${HOMETOPUP_KEY}`,
         'X-API-KEY': HOMETOPUP_KEY,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       }
     });
 
@@ -141,6 +141,21 @@ module.exports = async (req, res) => {
               reply_markup: { inline_keyboard: buttons }
             });
           }
+        } else if (data.startsWith('info_')) {
+          const [, code, price] = data.split('_');
+          const hargaFmt = new Intl.NumberFormat('id-ID').format(price);
+
+          await axios.post(`${TELEGRAM_API}/editMessageText`, {
+            chat_id: chatId,
+            message_id: messageId,
+            text: `🛒 <b>KONFIRMASI PESANAN</b>\n\nKode Produk: <code>${code}</code>\nHarga: <b>Rp ${hargaFmt}</b>\n\n<i>Sistem saldo otomatis terpotong dari saldo bot kamu.</i>`,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "⬅️ Kembali", callback_data: "menu_topup" }]
+              ]
+            }
+          });
         } else if (data === 'menu_profile') {
           const user = await getUserData(chatId, name);
           const saldoFormatted = new Intl.NumberFormat('id-ID').format(user.saldo || 0);
